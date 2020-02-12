@@ -84,7 +84,7 @@ class domain(object):
         import holoviews as hv
         if ptype == "shape":
             # Shape of airfoil (edges)
-            return hv.Curve(self.with_sep().xy).opts(aspect='equal', width=1000, height=500, padding=0.1)
+            return hv.Curve(self.with_sep().xy).opts(aspect='equal')
         elif ptype == "vectors":
             # Vectors at panel centeres
             pc = hv.Scatter(np.array([self.px, self.py]).T, kdims="px", vdims="py").opts(size=5)
@@ -268,17 +268,19 @@ class solution(domain):
                 width=500, height=500, padding=0.1)
         if y == "Cp":
             u = self.u_surface(offset=offset, offset_stag=offset_stag)
-            return hv.Curve(np.array([self.px, self.Cp(u)]).T, kdims=["x"], vdims="Cp").opts(width=500, height=500,
-                                                                                             padding=0.1,
-                                                                                             invert_yaxis=True)
+            return hv.Curve(np.array([self.px, self.Cp(u)]).T, kdims=["x"], vdims="Cp").opts(invert_yaxis=True)
 
     def plot_grid(self, x=None, y=None, vector_field=False):
         import holoviews as hv
         # Get velocity field
         xg, yg, u = self.u_grid(x=x, y=y)
-        qm = hv.Image((xg[0, :], yg[:, 0], np.abs(u))).opts(aspect='equal', width=1000, height=500)
+        qm = hv.Image((xg[0, :], yg[:, 0], np.abs(u))).opts(aspect='equal')
         if vector_field is True:
             vf = hv.VectorField((xg, yg, np.angle(u), np.abs(u)))
+            return qm * vf
+        elif isinstance(vector_field, int):
+            step = vector_field
+            vf = hv.VectorField((xg[::step, ::step], yg[::step, ::step], np.angle(u[::step, ::step]), np.abs(u[::step, ::step])))
             return qm * vf
         else:
             return qm
