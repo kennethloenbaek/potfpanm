@@ -115,3 +115,5 @@ dmypy.json
 
 # Do not upload pic
 *.png
+
+__dev__/

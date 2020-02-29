@@ -170,7 +170,12 @@ class solution(domain):
 
     def u_surface(self, offset=None, offset_stag=None):
         if offset_stag is not None:
-            pass
+            pz = self.pz
+            u_surf = self.u(pz)
+            i_stag = np.argmin(u_surf[1:-1])+1
+            pz[:i_stag] += self.nor[:i_stag]*np.linspace(offset_stag, 0, i_stag)
+            pz[i_stag:] += self.nor[i_stag:]*np.linspace(0, offset_stag, len(pz)-i_stag)
+            return self.u(pz)
         else:
             if offset is None: offset = 0.0
             pz = self.pz + self.nor * offset
@@ -278,7 +283,7 @@ class solution(domain):
         if vector_field is True:
             vf = hv.VectorField((xg, yg, np.angle(u), np.abs(u)))
             return qm * vf
-        elif isinstance(vector_field, int):
+        elif vector_field is not False:
             step = vector_field
             vf = hv.VectorField((xg[::step, ::step], yg[::step, ::step], np.angle(u[::step, ::step]), np.abs(u[::step, ::step])))
             return qm * vf
