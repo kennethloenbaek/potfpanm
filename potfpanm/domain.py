@@ -302,6 +302,7 @@ class solution(domain):
     def pressure(self, z, rho=1.225):
         """
         Computes the pressure at z [Pa]
+
         :param z: Points to compute the pressure at
         :type z: 1D ndarray, dtype=complex
         :param rho: flow density
@@ -313,7 +314,7 @@ class solution(domain):
 
     def Cp(self, z=None, u=None):
         """
-        Computes the pressure coefficient at z [-]
+        Computes the pressure coefficient at z or for a u [-]
 
         :param z: Points to compute the pressure at (can be None in which case u needs to be given)
         :type z: 1D ndarray, dtype=complex
@@ -333,16 +334,61 @@ class solution(domain):
             return 1 - (np.abs(self.u(z)) / np.abs(self.u_inf)) ** 2
 
     def forces(self, rho=1.225):
+        """
+        Computes forces for each shape as a complex number [N/m]
+
+        :param rho: Flow density
+        :type rho: float
+        :return: Force at the center of pressure as a complex number
+        :rtype: 1D ndarray, same size as shapes, dtype=complex
+        """
         Fs = np.empty_like(self._shapes, dtype=np.complex)
         for ishape, shape in enumerate(self._shapes):
             Fs[ishape] = -np.sum(self.pressure(shape.pz, rho=rho) * shape.nor * shape.dp)
         return Fs
 
+    @property
+    def Cforces(self):
+        """
+        Computes the force coefficient as a complex number [-]
+        The force coefficient is computed as solutions.force/(0.5*rho*scale*Uinf**2)
+        Where rho=1.0, scale is taken for the shape property and Uinf is the freestream wind speed
+
+        :return: Force coefficients in x-y plane
+        :rtype: 1D ndarray, same size as shape, dtype=complex
+        """
+        rho = 1.0
+        forces = self.forces(rho=rho)
+        Cforces = np.empty_like(forces)
+        for i_shape, (forcesld, shape) in enumerate(zip(forces, self._shapes)):
+            Cforces[i_shape] = forcesld / (1 / 2 * rho * shape.scale * np.abs(self.u_inf) ** 2)
+        return Cforces
+
     def forcesld(self, rho=1.225):
+        """
+        Computes forces for each shape as a complex number and then rotate it to be along flow direction [N/m]
+        drag = solution.forcesld(rho=rho).real
+        lift = solution.forcesld(rho=rho).imag
+
+        :param rho: Flow density
+        :type rho: float
+        :return: Force at the center of pressure rotated to along flow direction as a complex number
+        :rtype: 1D ndarray, same size as shapes, dtype=complex
+        """
         return self.forces(rho=rho) * self.u_inf.conj() / self._Uinf
 
     @property
-    def Cforces(self):
+    def Cforcesld(self):
+        """
+        Computes the force coefficient rotated into the flow direction as a complex number [-]
+        The force coefficient is computed as solutions.force/(0.5*rho*scale*Uinf**2)
+        Where rho=1.0, scale is taken for the shape property and Uinf is the freestream wind speed
+        Cd = solution.Cforcesld(rho=rho).real
+        Cl = solution.Cforcesld(rho=rho).imag
+
+        :return: Force coefficients in the flow direction
+        :rtype: 1D ndarray, same size as shape, dtype=complex
+        """
         rho = 1.0
         forceslds = self.forcesld(rho=rho)
         Cforces = np.empty_like(forceslds)
@@ -351,20 +397,76 @@ class solution(domain):
         return Cforces
 
     def lift(self, rho=1.225):
+        """
+        Computes the lift forces for each shape [N/m]
+
+        :param rho: Flow density
+        :type rho: float
+        :return: Lift force for each shape at the center of pressure
+        :rtype: 1D ndarray, same size as shapes, dtype=float
+        """
         return self.forcesld(rho=rho).imag
 
     @property
     def Cl(self):
-        return self.Cforces.imag
+        """
+        Computes the lift coefficient for each shape [-]
+        The force coefficient is computed as solutions.forceld(rho=rho).imag/(0.5*rho*scale*Uinf**2)
+
+        :param rho: Flow density
+        :type rho: float
+        :return: Lift coefficient for each shape at the center of pressure
+        :rtype: 1D ndarray, same size as shapes, dtype=float
+        """
+        return self.Cforcesld.imag
 
     def drag(self, rho=1.225):
+        """
+        Computes the drag forces for each shape [N/m]
+
+        :param rho: Flow density
+        :type rho: float
+        :return: Drag force for each shape at the center of pressure
+        :rtype: 1D ndarray, same size as shapes, dtype=float
+        """
         return self.forcesld(rho=rho).real
 
     @property
     def Cd(self):
-        return self.Cforces.real
+        """
+        Computes the drag coefficient for each shape [-]
+        The force coefficient is computed as solutions.forceld(rho=rho).real/(0.5*rho*scale*Uinf**2)
 
-    def u_grid(self, x=None, y=None, return_grid=True):
+        :param rho: Flow density
+        :type rho: float
+        :return: Drag coefficient for each shape at the center of pressure
+        :rtype: 1D ndarray, same size as shapes, dtype=float
+        """
+        return self.Cforcesld.real
+
+    def u_grid(self, x=None, y=None, return_grid=False):
+        """
+        Computes the flow velocity on a uniform grid. Flow velocity as a complex number. [m/s]
+        Input for x and y can be either of the 5 input: None, int, float, list, ndarray
+        At the end x and y is made it to a 1D ndarray and a meshgrid is created from these arrays
+
+        In the below examples x is the input which is overwritten. The x_* is computed from the shape size.
+        None: x=np.linspace(x_min-x_range, x_max+x_range, 100), The default case
+        int: x=np.linspace(x_min-x_range, x_max+x_range, x), Changing the resolution
+        float: x=np.linspace(x_min-x_range*x, x_max+x_range*x, 100), Changing the range (<1 smaller than default)
+        list: x=np.linspace(x_min-x_range*x[1], x_max+x_range*x[1], x[0]), Changing resolution and range
+        ndarray: x is directly given to meshgrid
+
+        :param x: input for creating x range and resolution
+        :type x: None, int, float, list, ndarray
+        :param y: input for creating y range and resolution
+        :type y: None, int, float, list, ndarray
+        :param return_grid: Flag for returning mesh grid as well (default: False)
+        :type return_grid: bool
+        :return: Flow velocity as a complex number (if return_grid=True, return xg, yg, ug)
+        :rtype: 2D ndarray, dtype=complex (if return_grid=True -> 2D ndarray.dtype(float), 2D ndarray.dtype(float), 2D ndarray.dtype(complex))
+        """
+
         # TODO: Add cluster parameter
         if x is None or isinstance(x, (float, int)):
             x_min = self.x.min()
@@ -412,39 +514,75 @@ class solution(domain):
             return u
 
     def hvplot_surface(self, x="x", y="Cp", offset=None, offset_stag=None):
+        """
+        Plots the surface value for each shape (using holoviews)
+
+        :param x: Value to plot along x-axis (only x-panel center for now)
+        :type x: str
+        :param y: Value to plot along y-axis (Either Cp: Pressure coefficeint or u: Velocity magnitude)
+        :type y: str
+        :param offset_stag: If given the surface velocity is computed at a surface that increasing linearly from the
+        stagnation point. The value of offset_stag is the offset at the traling edge.
+        :type offset_stag: float
+        :return: Holoviews Curve object (for Cp the y-axis is inverted)
+        :rtype: Holoviews.Curve
+        """
+
         try:
             import holoviews as hv
         except ImportError:
             raise ImportError("To use the plot method holoviews is requried, see more here: http://holoviews.org/")
 
         if y == "u":
-            return hv.Curve(np.array([self.px, np.abs(self.u_surface(offset=offset, offset_stag=offset_stag))]).T).opts(
-                width=500, height=500, padding=0.1)
+            return hv.Curve(np.array([self.px, np.abs(self.u_surface(offset=offset, offset_stag=offset_stag))]).T).opts(padding=0.1)
         if y == "Cp":
             u = self.u_surface(offset=offset, offset_stag=offset_stag)
             return hv.Curve(np.array([self.px, self.Cp(u)]).T, kdims=["x"], vdims="Cp").opts(invert_yaxis=True)
 
-    def hvplot_grid(self, x=None, y=None, vector_field=False):
+    def hvplot_grid(self, x=None, y=None):
+        """
+        Plots flow on a uniform grid.
+        Input for x and y can be either of the 5 input: None, int, float, list, ndarray
+        At the end x and y is made it to a 1D ndarray and a meshgrid is created from these arrays
+
+        In the below examples x is the input which is overwritten. The x_* is computed from the shape size.
+        None: x=np.linspace(x_min-x_range, x_max+x_range, 100), The default case
+        int: x=np.linspace(x_min-x_range, x_max+x_range, x), Changing the resolution
+        float: x=np.linspace(x_min-x_range*x, x_max+x_range*x, 100), Changing the range (<1 smaller than default)
+        list: x=np.linspace(x_min-x_range*x[1], x_max+x_range*x[1], x[0]), Changing resolution (x[0]) and range (x[1])
+        ndarray: x is directly given to meshgrid
+
+        :param x: input for creating x range and resolution
+        :type x: None, int, float, list, ndarray
+        :param y: input for creating y range and resolution
+        :type y: None, int, float, list, ndarray
+        :return: Holoviews Image object (with equal aspect)
+        :rtype: Holoviews.Image
+        """
+
         try:
             import holoviews as hv
         except ImportError:
             raise ImportError("To use the plot method holoviews is requried, see more here: http://holoviews.org/")
 
         # Get velocity field
-        xg, yg, u = self.u_grid(x=x, y=y)
+        xg, yg, u = self.u_grid(x=x, y=y, return_grid=True)
         qm = hv.Image((xg[0, :], yg[:, 0], np.abs(u))).opts(aspect='equal')
-        if vector_field is True:
-            vf = hv.VectorField((xg, yg, np.    angle(u), np.abs(u)))
-            return qm * vf
-        elif vector_field is not False:
-            step = vector_field
-            vf = hv.VectorField((xg[::step, ::step], yg[::step, ::step], np.angle(u[::step, ::step]), np.abs(u[::step, ::step])))
-            return qm * vf
-        else:
-            return qm
+        return qm
 
 
 class solutions(object):
+    """
+    solutions object is a collection of solution objects.
+    Each solution object can be accesd though indexing.
+        >>> solution = solutions[0] # Will return the first solution in solutions
+    A property or attribute of each of the solutions can be outputted by indexing as a string
+        >>> Cl = solutions["Cl"] # Will return a 2D ndarray with index 1. being solution index 2. shape index
+    Most attributes of a solution can also be accesed as a property
+        >>> Cl = solutions.Cl # Will return a 2D ndarray with index 1. being solution index 2. shape index
+    It also has a plot method to plot a polar of a given shape index
+        >>> solutions.hvplot_polar(iair=0) # Returns a holoviews dynamic-map plotting the polar and Cp curves (which can be updated on click)
+    """
     def __init__(self, solutions = []):
         self._solutions = deepcopy(solutions)
 
@@ -463,21 +601,56 @@ class solutions(object):
 
     @property
     def aoa_deg(self):
+        """
+        Angle of attack (or angle of incidence) of the flow in degrees
+
+        :return: 2D ndarray with index 1. being solution index 2. shape index
+        :rtype: 2D ndarray, index 1: solution, index 2: shape, dtype=float
+        """
         return self["aoa_deg"]
 
     @property
     def aoa_rad(self):
+        """
+        Angle of attack (or angle of incidence) of the flow in radian
+
+        :return: 2D ndarray with index 1. being solution index 2. shape index
+        :rtype: 2D ndarray, index 1: solution, index 2: shape, dtype=float
+        """
         return self["aoa_rad"]
 
     @property
     def Cl(self):
+        """
+        Computes the lift coefficient for each shape [-]
+        The force coefficient is computed as solutions.forceld(rho=rho).imag/(0.5*rho*scale*Uinf**2)
+
+        :return: 2D ndarray with index 1. being solution index 2. shape index
+        :rtype: 2D ndarray, index 1: solution, index 2: shape, dtype=float
+        """
         return self["Cl"]
 
     @property
     def Cd(self):
+        """
+        Computes the drag coefficient for each shape [-]
+        The force coefficient is computed as solutions.forceld(rho=rho).real/(0.5*rho*scale*Uinf**2)
+
+        :return: 2D ndarray with index 1. being solution index 2. shape index
+        :rtype: 2D ndarray, index 1: solution, index 2: shape, dtype=float
+        """
         return self["Cd"]
 
     def hvplot_polar(self, iair=0):
+        """
+        Plots aoa vs. Cl togheter with related x vs. Cp as holoviews dynamic-map.
+        Click on points to only plot selected Cp curve (hold shift at click to select more points, click anywhere to deselect)
+
+        :param iair: Index for which shape to plot
+        :type iair: int
+        :return: Holoviews dynamic-map with aoa vs. Cl and x vs. Cp
+        :rtype: holoviews.Curve*holoviews.Points + holoviews.DynamicMap
+        """
         try:
             import holoviews as hv
         except ImportError:
